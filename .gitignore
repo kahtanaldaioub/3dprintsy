@@ -1,0 +1,10 @@
+node_modules/
+client/dist/
+server/uploads/
+server/.env
+.env
+npm-debug.log*
+ai-service/.venv/
+ai-service/__pycache__/
+ai-service/**/__pycache__/
+ai-service/.pytest_cache/

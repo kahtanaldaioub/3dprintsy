@@ -1,0 +1,6 @@
+fastapi>=0.115,<1
+numpy>=2.2,<3
+networkx>=3,<4
+python-multipart>=0.0.20,<1
+trimesh>=4.7,<5
+uvicorn>=0.34,<1
