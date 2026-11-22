@@ -37,7 +37,63 @@ class AnalysisSettings:
             raise ValueError("Minimum overall dimension must be positive.")
 
 
+
+def _preflight_triangle_count(contents: bytes, file_format: str) -> None:
+    """Reject oversized STL/OBJ meshes before loading them with trimesh."""
+    if file_format == "stl":
+        # Binary STL has an 80-byte header followed by a 4-byte
+        # triangle count and 50 bytes per triangle.
+        if len(contents) >= 84:
+            binary_count = int.from_bytes(contents[80:84], "little")
+            expected_size = 84 + binary_count * 50
+
+            # A matching size identifies a structurally valid binary STL.
+            if expected_size == len(contents):
+                if binary_count > MAX_TRIANGLES:
+                    raise ValueError(
+                        f"The model exceeds the limit of {MAX_TRIANGLES:,} triangles."
+                    )
+                return
+
+            # A non-ASCII header is strong evidence that this is a
+            # malformed binary STL, not an ASCII STL.
+            if b"\x00" in contents[:80]:
+                raise ValueError("The binary STL file has an invalid structure.")
+
+        # ASCII STL: count facet normal records before loading.
+        triangle_count = 0
+
+        for line in BytesIO(contents):
+            parts = line.strip().lower().split()
+
+            if len(parts) >= 2 and parts[:2] == [b"facet", b"normal"]:
+                triangle_count += 1
+
+                if triangle_count > MAX_TRIANGLES:
+                    raise ValueError(
+                        f"The model exceeds the limit of {MAX_TRIANGLES:,} triangles."
+                    )
+
+    elif file_format == "obj":
+        # OBJ polygons are triangulated as n - 2 triangles.
+        triangle_count = 0
+
+        for line in BytesIO(contents):
+            parts = line.split(b"#", 1)[0].split()
+
+            if parts and parts[0] == b"f":
+                vertex_count = len(parts) - 1
+
+                if vertex_count >= 3:
+                    triangle_count += vertex_count - 2
+
+                    if triangle_count > MAX_TRIANGLES:
+                        raise ValueError(
+                            f"The model exceeds the limit of {MAX_TRIANGLES:,} triangles."
+                        )
+
 def _load_mesh(contents: bytes, file_format: str) -> trimesh.Trimesh:
+    _preflight_triangle_count(contents, file_format)
     try:
         loaded: Any = trimesh.load(
             BytesIO(contents),

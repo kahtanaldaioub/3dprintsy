@@ -4,8 +4,13 @@ import unittest
 
 import trimesh
 
-from app.analyzer import MAX_FILE_BYTES, AnalysisSettings, analyze_mesh
-
+from app.analyzer import (
+    MAX_FILE_BYTES,
+    MAX_TRIANGLES,
+    AnalysisSettings,
+    analyze_mesh,
+)
+from unittest.mock import patch
 
 def tetrahedron_obj() -> bytes:
     return b"""\
@@ -92,5 +97,66 @@ class AnalyzeMeshTests(unittest.TestCase):
             analyze_mesh(b"this is not a mesh", "broken.obj")
 
 
+    def test_rejects_oversized_binary_stl_before_loading(self) -> None:
+        triangle_count = MAX_TRIANGLES + 1
+        contents = (
+            bytes(80)
+            + triangle_count.to_bytes(4, "little")
+            + bytes(triangle_count * 50)
+        )
+
+        with patch("app.analyzer.trimesh.load") as mesh_loader:
+            with self.assertRaisesRegex(ValueError, "500,000 triangles"):
+                analyze_mesh(contents, "large.stl")
+
+            mesh_loader.assert_not_called()
+
+    def test_rejects_oversized_ascii_stl_before_loading(self) -> None:
+        contents = b"solid test\n" + (
+            b"facet normal 0 0 1\n" * (MAX_TRIANGLES + 1)
+        )
+
+        with patch("app.analyzer.trimesh.load") as mesh_loader:
+            with self.assertRaisesRegex(ValueError, "500,000 triangles"):
+                analyze_mesh(contents, "large.stl")
+
+            mesh_loader.assert_not_called()
+
+    def test_rejects_oversized_obj_before_loading(self) -> None:
+        contents = (
+            b"v 0 0 0\n"
+            b"v 1 0 0\n"
+            b"v 0 1 0\n"
+            + b"f 1 2 3\n" * (MAX_TRIANGLES + 1)
+        )
+
+        with patch("app.analyzer.trimesh.load") as mesh_loader:
+            with self.assertRaisesRegex(ValueError, "500,000 triangles"):
+                analyze_mesh(contents, "large.obj")
+
+            mesh_loader.assert_not_called()
+
+    def test_counts_obj_polygon_faces_as_multiple_triangles(self) -> None:
+        # A polygon with 500,003 vertices represents 500,001 triangles.
+        face = b"f " + b"1 " * (MAX_TRIANGLES + 3) + b"\n"
+
+        with patch("app.analyzer.trimesh.load") as mesh_loader:
+            with self.assertRaisesRegex(ValueError, "500,000 triangles"):
+                analyze_mesh(face, "large.obj")
+
+            mesh_loader.assert_not_called()
+    def test_rejects_malformed_binary_stl_before_loading(self) -> None:
+        # Binary-looking header with an impossible declared file size.
+        contents = (
+            b"\x00" * 80
+            + (10).to_bytes(4, "little")
+            + bytes(50)
+        )
+
+        with patch("app.analyzer.trimesh.load") as mesh_loader:
+            with self.assertRaisesRegex(ValueError, "invalid structure"):
+                analyze_mesh(contents, "malformed.stl")
+
+            mesh_loader.assert_not_called()
 if __name__ == "__main__":
     unittest.main()
