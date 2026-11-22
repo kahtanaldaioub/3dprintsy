@@ -7,6 +7,7 @@ import trimesh
 from app.analyzer import (
     MAX_FILE_BYTES,
     MAX_TRIANGLES,
+    MAX_VERTICES,
     AnalysisSettings,
     analyze_mesh,
 )
@@ -156,6 +157,18 @@ class AnalyzeMeshTests(unittest.TestCase):
         with patch("app.analyzer.trimesh.load") as mesh_loader:
             with self.assertRaisesRegex(ValueError, "invalid structure"):
                 analyze_mesh(contents, "malformed.stl")
+
+            mesh_loader.assert_not_called()
+
+    def test_rejects_oversized_obj_vertex_count_before_loading(self) -> None:
+        contents = b"v 0 0 0\n" * (MAX_VERTICES + 1)
+
+        with patch("app.analyzer.trimesh.load") as mesh_loader:
+            with self.assertRaisesRegex(
+                ValueError,
+                "1,000,000 vertices",
+            ):
+                analyze_mesh(contents, "large.obj")
 
             mesh_loader.assert_not_called()
 if __name__ == "__main__":

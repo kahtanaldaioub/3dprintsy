@@ -10,6 +10,7 @@ import trimesh
 
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_TRIANGLES = 500_000
+MAX_VERTICES = 1_000_000
 DEFAULT_BUILD_VOLUME_MM = (220.0, 220.0, 250.0)
 DEFAULT_OVERHANG_ANGLE_DEGREES = 45.0
 DEFAULT_MIN_OVERALL_DIMENSION_MM = 0.8
@@ -75,23 +76,34 @@ def _preflight_triangle_count(contents: bytes, file_format: str) -> None:
                     )
 
     elif file_format == "obj":
-        # OBJ polygons are triangulated as n - 2 triangles.
+        # Count raw vertex records and triangulate polygon faces.
         triangle_count = 0
+        vertex_count = 0
 
         for line in BytesIO(contents):
             parts = line.split(b"#", 1)[0].split()
 
-            if parts and parts[0] == b"f":
-                vertex_count = len(parts) - 1
+            if not parts:
+                continue
 
-                if vertex_count >= 3:
-                    triangle_count += vertex_count - 2
+            if parts[0] == b"v":
+                vertex_count += 1
+
+                if vertex_count > MAX_VERTICES:
+                    raise ValueError(
+                        f"The model exceeds the limit of {MAX_VERTICES:,} vertices."
+                    )
+
+            elif parts[0] == b"f":
+                face_vertex_count = len(parts) - 1
+
+                if face_vertex_count >= 3:
+                    triangle_count += face_vertex_count - 2
 
                     if triangle_count > MAX_TRIANGLES:
                         raise ValueError(
                             f"The model exceeds the limit of {MAX_TRIANGLES:,} triangles."
                         )
-
 def _load_mesh(contents: bytes, file_format: str) -> trimesh.Trimesh:
     _preflight_triangle_count(contents, file_format)
     try:
@@ -123,6 +135,14 @@ def _load_mesh(contents: bytes, file_format: str) -> trimesh.Trimesh:
     if len(loaded.faces) > MAX_TRIANGLES:
         raise ValueError(
             f"The model exceeds the limit of {MAX_TRIANGLES:,} triangles."
+        )
+    if file_format == "obj" and len(loaded.vertices) > MAX_VERTICES:
+        raise ValueError(
+            f"The model exceeds the limit of {MAX_VERTICES:,} vertices."
+        )
+    if len(loaded.vertices) > MAX_VERTICES:
+        raise ValueError(
+            f"The model exceeds the limit of {MAX_VERTICES:,} vertices."
         )
     if not np.isfinite(loaded.vertices).all():
         raise ValueError("The mesh contains invalid vertex coordinates.")
